@@ -1,12 +1,18 @@
 # MSA-Kit 中文开发指南
 
+[English](guide.md) | **简体中文**
+
+本指南把 [README 的比对示例](../README.zh-CN.md#first-result) 与 C++ 实现连起来：跟踪同样三条记录如何变成输入对象、对齐字符串和输出文件，在使用接口的地方解释相关术语。
+
 MSA-Kit 0.3.0 是可复制的 DNA/RNA 多序列比对程序模板：复用输入输出、命令行和结果验证代码，把开发工作集中在比对算法上。本版采用 HAlign-5 固定版本的 `kseq.h` 读取 FASTA/FASTQ，`src` 按功能组织为七个文件，派生开发者主要编辑 `src/align.cpp`。
 
-仓库已包含 C++17 实现、参考星比对、小型示例和测试。实际执行的构建与测试结果见 [验证记录](validation.md)。
+仓库已包含 C++17 实现、参考星比对、小型示例和测试。实际执行的构建与测试结果见 [验证记录](validation.zh-CN.md)。
 
-完整接口定义见 [英文设计文档](design.md)，项目概览见 [README](../README.md)。本指南解释如何理解框架和替换核心，不另行定义一套规则。
+完整接口定义见 [设计规范](design.zh-CN.md)，项目概览见 [README](../README.zh-CN.md)。本指南解释如何理解框架和替换核心，不另行定义一套规则。
 
 ## 1. 程序分成哪些部分
+
+先认识这里的模块名：**CLI** 解释 `-i`、`-o` 等命令行参数；**kseq** 把 FASTA/FASTQ 字节读成记录；**zlib** 处理 gzip 压缩；**核心**计算对齐。**外围支持库**把这些共用外围代码编译后提供给程序与测试使用。
 
 数据依次经过五个部分：
 
@@ -86,6 +92,22 @@ Alignment align(const std::vector<SequenceRecord>& input);
 
 返回值中的 `rows[i]` 对应 `input[i]`。例如第 3 条输入必须仍然对应第 3 条输出；核心内部即使排序或分组，也必须恢复这个对应关系。
 
+### 跟踪一次比对经过接口的过程
+
+对 `examples/tiny.fasta`，输入 vector 就是包含三条记录的列表。C++ 下标从 0 开始：
+
+| 位置 | `input[i].header` | `input[i].sequence` | 参考结果 `rows[i]` |
+| --- | --- | --- | --- |
+| 0 | `center` | `AC` | `A--C` |
+| 1 | `q1` | `ATC` | `AT-C` |
+| 2 | `q2` | `AGGC` | `AGGC` |
+
+SequenceRecord 把名称和序列放在一起；Alignment 保存对齐后的字符串列表，不含 FASTA 的 `>` 标题行。框架保留名称、检查这些字符串，再写出完整 FASTA，因此算法处理序列即可，不需要再写一个 FASTA 解析器。
+
+const 让传入列表只读，`&` 表示引用框架已有列表而不复制。rows[i] 与 input[i] 使用相同下标，输出层就能把正确名称与对齐序列重新组合。表格描述这次示例计算出的结果；算法必须为实际输入计算，不能固定返回这几个字符串。
+
+修改前先在 [align.cpp](../src/align.cpp) 找到三处：align() 接收记录、align_pair() 做两两对齐、插入槽合并构造最终行。先跟踪 AC/ATC/AGGC 如何经过它们，再替换计算部分；读取和写出继续使用外围模块。
+
 记录位置是内部身份，标题可以重复。不要用标题作为唯一键，否则同名记录可能被覆盖。输出层使用重建后保存的标题，因此核心只需返回对齐后的序列字符串。
 
 核心不能自行解析参数、读写文件或输出 FASTA。失败时抛出异常，由统一入口记录错误并返回退出码；不要返回不完整的结果作为成功输出。
@@ -94,7 +116,7 @@ Alignment align(const std::vector<SequenceRecord>& input);
 
 将自定义核心的声明和定义都改为上面的 `const std::vector<SequenceRecord>&` 签名。自定义核心回调或辅助函数若使用旧的 `std::span` 参数，也要同步调整，移除不再使用的 `<span>` 头文件，并改写依赖 span 的操作。框架内部的核心函数指针、验证及输出接口也采用相同的只读引用。已有 `align(records)` 调用在传入框架的输入 vector 时无需增加转换。
 
-在新的构建目录中重新编译框架、自定义核心及测试，再运行 `contract` 组。不要混用旧接口编译的对象文件。`SequenceRecord` 与 `Alignment` 的字段、输入位置对应关系和结果约定保持不变；CLI 用法及数据处理行为也保持不变，`--version` 更新为 `0.3.0`。编译器验收范围见 [测试说明](testing.md#c17-build-compatibility)，具体执行结果见 [验证记录](validation.md)。
+在新的构建目录中重新编译框架、自定义核心及测试，再运行 `contract` 组。不要混用旧接口编译的对象文件。`SequenceRecord` 与 `Alignment` 的字段、输入位置对应关系和结果约定保持不变；CLI 用法及数据处理行为也保持不变，`--version` 更新为 `0.3.0`。编译器验收范围见 [测试说明](testing.zh-CN.md#c17-build-compatibility)，具体执行结果见 [验证记录](validation.zh-CN.md)。
 
 ## 3. 进入核心前，序列会怎样变化
 
@@ -126,7 +148,7 @@ kseq 负责记录与行的解析，保留下来的空格、制表符等字节会
 | 首个碱基前有一个空 CRLF 行 | 初始 CR 会保留，清洗后贡献一个 `N`；LF 空行则忽略 |
 | 完整记录后只有一个尾随 `>` | kseq 可以直接报告 EOF，没有返回一条新的空记录 |
 
-CR 的规则取决于 kseq 字段累计长度：按行读取的字段长度大于 1 时去掉末尾 CR，即使该 CR 后没有 LF。因此不再承诺旧版“只删除真正 CRLF”的行为。更完整的例子见 [输入规范](design.md#4-input-contract)。本版不增加 Unicode 解释或自动格式修复。
+CR 的规则取决于 kseq 字段累计长度：按行读取的字段长度大于 1 时去掉末尾 CR，即使该 CR 后没有 LF。因此不再承诺旧版“只删除真正 CRLF”的行为。更完整的例子见 [输入规范](design.zh-CN.md#4-input-contract)。本版不增加 Unicode 解释或自动格式修复。
 
 读取不到任何记录、返回的标题为空或仅含 ASCII 空白、返回空序列、已有 gap，以及 kseq 报告的质量长度错误，均返回内容错误 `3`。错误保留来源和能够确定的记录号，不再承诺精确物理行号。部分旧版拒绝的异常输入会被 kseq 接受或跳过；校验对象是 kseq 实际返回的记录。
 
@@ -138,7 +160,7 @@ T 与 U 始终保留各自字符。参考核心仅在评分时把它们视为同
 
 ## 4. 构建与使用
 
-本版支持 Linux，需要 C++17 编译器、CMake ≥ 3.18 和系统 zlib 开发文件。CLI11、spdlog、doctest 和 kseq 已随仓库固定来源附带，正常配置和构建不会下载依赖。启用测试时还需要 Python ≥ 3.8；运行 `msakit` 不依赖 Python。依赖版本、来源和许可见 [第三方声明](../THIRD_PARTY_NOTICES.md)。
+本版支持 Linux，需要 C++17 编译器、CMake ≥ 3.18 和系统 zlib 开发文件。CLI11、spdlog、doctest 和 kseq 已随仓库固定来源附带，正常配置和构建不会下载依赖。启用测试时还需要 Python ≥ 3.8；运行 `msakit` 不依赖 Python。依赖版本、来源和许可见 [第三方声明](../THIRD_PARTY_NOTICES.zh-CN.md)。
 
 在仓库根目录构建并运行测试：
 
@@ -268,9 +290,9 @@ AGGC
 
 参考核心另有小型合成测试，覆盖单条序列、重复序列、前缀/内部/后缀插入、删除、N、T/U、不同插入长度和并列回溯。独立穷举路径用于检查短序列两两最优分数，生成的小型多序列数据用于检查结果属性与可重复性。具体 gap 布局只用于参考核心测试，不能作为所有新算法的唯一正确答案。
 
-CTest 的 `unit` 入口运行 doctest 模块测试，`integration` 入口通过 Python 标准库运行真实子进程、压缩、管道和文件生命周期测试。实际执行结果见 [验证记录](validation.md)。
+CTest 的 `unit` 入口运行 doctest 模块测试，`integration` 入口通过 Python 标准库运行真实子进程、压缩、管道和文件生命周期测试。实际执行结果见 [验证记录](validation.zh-CN.md)。
 
-输入处理用例集中保存在 [输入用例表](../tests/input_cases.py)，每例都有稳定编号、原始字节和独立的预期结果。新增一种输入情况时，可按 [测试矩阵与扩展指南](testing.md) 添加用例，复用文件、标准输入及 gzip 通道检查。失败报告包含用例编号、输入输出通道和错误信息；生成测试使用固定种子，便于复现。
+输入处理用例集中保存在 [输入用例表](../tests/input_cases.py)，每例都有稳定编号、原始字节和独立的预期结果。新增一种输入情况时，可按 [测试矩阵与扩展指南](testing.zh-CN.md) 添加用例，复用文件、标准输入及 gzip 通道检查。失败报告包含用例编号、输入输出通道和错误信息；生成测试使用固定种子，便于复现。
 
 通道一致性检查关注标题、清洗后序列、转换计数和结果约定。不同核心的合法 gap 布局可以不同；压缩输出先独立解压再检查。内部读取操作替身还用于稳定模拟短读、中断和读取、关闭失败，生产命令行没有对应的测试开关。
 
@@ -289,8 +311,8 @@ cmake --build build-sanitize --parallel 2
 
 设计固定参考 [HAlign-5 提交 b0d5608](https://github.com/pinglu-zhang/HAlign-5/tree/b0d5608811d44e30bc323da54f0583ceaaf684d2)，完整提交号为 `b0d5608811d44e30bc323da54f0583ceaaf684d2`。
 
-MSA-Kit 沿用其 CMake、CLI11、字符查表清洗及缓冲读写思路，并采用相同的 kseq 记录读取与 `name/comment` 标题重建方式。本项目从 0.3.0 起使用 C++17。固定版本的 `kseq.h` 保留原 MIT 声明，并记录原始校验值及本地安全补丁。输入 gap 拒绝、位置身份、严格 gzip 校验、标准错误日志和输出完成检查属于 MSA-Kit 明确规定的行为；具体来源和改写范围见 [英文设计文档](design.md)。
+MSA-Kit 沿用其 CMake、CLI11、字符查表清洗及缓冲读写思路，并采用相同的 kseq 记录读取与 `name/comment` 标题重建方式。本项目从 0.3.0 起使用 C++17。固定版本的 `kseq.h` 保留原 MIT 声明，并记录原始校验值及本地安全补丁。输入 gap 拒绝、位置身份、严格 gzip 校验、标准错误日志和输出完成检查属于 MSA-Kit 明确规定的行为；具体来源和改写范围见 [设计规范](design.zh-CN.md)。
 
-HAlign-5 的 WFA2、KSW2、MinHash、外部 MSA 命令和参考 profile 流程没有进入首版基础模板。HAlign-5 及依赖的版本、来源和许可说明见 [第三方声明](../THIRD_PARTY_NOTICES.md)。
+HAlign-5 的 WFA2、KSW2、MinHash、外部 MSA 命令和参考 profile 流程没有进入首版基础模板。HAlign-5 及依赖的版本、来源和许可说明见 [第三方声明](../THIRD_PARTY_NOTICES.zh-CN.md)。
 
 MSA-Kit 采用 [MIT 许可](../LICENSE)。复制模板开发新项目时，应保留实际复用内容及第三方依赖的版权、许可和来源声明。

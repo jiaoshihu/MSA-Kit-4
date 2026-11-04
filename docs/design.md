@@ -1,10 +1,16 @@
 # MSA-Kit design
 
+**English** | [简体中文](design.zh-CN.md)
+
+This is a reference for exact behavior. For a first hands-on introduction, start with [the README walkthrough](../README.md#what-is-msa), then continue to [the developer guide](guide.md) when you want to modify the algorithm.
+
 This document defines MSA-Kit version 0.3.0. See the
-[project overview](../README.md) and [Chinese developer guide](guide.zh-CN.md).
+[project overview](../README.md) and [developer guide](guide.md).
 Requirements here describe the implemented public contract. Build instructions
 are below; measured validation results are recorded in the
 [validation report](validation.md).
+
+Here, a **contract** is a rule that any replacement algorithm must satisfy, such as retaining every cleaned input residue. A **reference algorithm** is the particular star implementation shipped with the project. Its scoring and gap choices describe that implementation, while the shared input/output rules apply to every core. The architecture below locates each responsibility in the program.
 
 ## 1. Status and scope
 

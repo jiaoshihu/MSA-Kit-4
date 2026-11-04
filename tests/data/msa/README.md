@@ -1,5 +1,7 @@
 # Synthetic multi-sequence inputs
 
+**English** | [简体中文](README.zh-CN.md)
+
 These six FASTA files are hand-specified, synthetic software-test fixtures.
 They are not biological samples, published benchmark datasets, or reference
 alignments. No expected gap layout is attached: any core that returns a legal

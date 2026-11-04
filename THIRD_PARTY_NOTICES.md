@@ -1,5 +1,7 @@
 # Sources and third-party notices
 
+**English** | [简体中文](THIRD_PARTY_NOTICES.zh-CN.md)
+
 MSA-Kit is distributed under the [MIT license](LICENSE). The following upstream
 notices apply to copied or adapted material and are retained separately where
 the upstream license differs.
@@ -70,5 +72,5 @@ records before passing them to kseq.
 
 zlib is linked as a required system library and is not vendored here. Its own
 license remains applicable; see [zlib's license](https://zlib.net/zlib_license.html).
-Python 3 is used only by the optional test suite. No third-party license is
+Python 3 is used by the optional test suite and the explicit website adapter; the C++ executable does not require it. No third-party license is
 replaced by MSA-Kit's license.

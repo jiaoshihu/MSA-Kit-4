@@ -1,5 +1,23 @@
 # Input handling tests
 
+**English** | [简体中文](testing.zh-CN.md)
+
+This guide shows how to turn the result checks used in the [README](../README.md#check-result) into reusable software tests. `contract` means program rules every core must satisfy; `reference` means the supplied algorithm's particular scores and layouts.
+
+## Read an assertion as an alignment question
+
+For the tiny input AC/ATC/AGGC, consider:
+
+```text
+                 center    q1      q2
+Reference core   A--C      AT-C    AGGC
+Another layout   A--C      A-TC    AGGC
+```
+
+Both layouts have four columns, preserve each input after removing gaps and have no all-gap column. A contract test allows either; the reference-core test expects the first layout under that core's fixed rules. If q1 becomes AC, a residue was lost and the contract must reject it even if all rows are padded to the same width.
+
+This is why tests separately ask whether data was preserved and whether a particular algorithm followed its scoring/traceback rules. Biological quality is assessed separately using appropriate evidence or reference data.
+
 MSA-Kit's input tests describe what each input means, how it is cleaned or
 rejected, and what may happen to output files. They use synthetic bytes and
 small sequences. The authoritative behavior remains the
@@ -30,7 +48,7 @@ doctest cases, Python test methods, and parameter combinations.
 
 Production code is organized into seven source-directory files: the entry point,
 command line/application flow, input, output, result validation, algorithm, and
-one shared internal header. See the [source map](../README.md#architecture).
+one shared internal header. See the [source map](guide.md#1-responsibilities-and-data-flow).
 The support library compiles the four framework modules separately. Module and
 alternative-core tests link this same library as the executable. Replacing
 `src/align.cpp` does not require copying input or output code into a separate

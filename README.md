@@ -1,372 +1,273 @@
 # MSA-Kit
 
-A reusable template for building multiple sequence alignment tools with consistent input/output conventions and command-line interfaces.
+**English** | [简体中文](README.zh-CN.md)
 
-MSA-Kit is designed so that developers can copy the project, replace its alignment core, and reuse the surrounding sequence readers, writers, command-line interface, and result checks.
+Use one project to understand multiple sequence alignment, produce your first result, and then develop and evaluate your own algorithm.
 
-**Version 0.3.0.** MSA-Kit uses C++17 and passes prepared records to the core by a read-only vector reference. Sequence records are parsed with the pinned HAlign-5 `kseq.h`. Seven source-directory files separate the command line, input, output, validation and algorithm, with one shared internal header. Developers primarily replace `src/align.cpp`. The reference algorithm is deliberately small and readable, intended for learning and replacement rather than large-scale production alignment. Build and test instructions are below.
+MSA-Kit is a DNA/RNA alignment program and a reusable C++ template, currently **version 0.3.0**. Work through the synthetic example on this page, build and run the program, then continue to the developer guide when you want to change its algorithm. You do not need C++ knowledge to run these exercises.
 
-## Documentation
+**Reading path:** [What MSA does](#what-is-msa) → [FASTA input](#fasta-input) → [Setup](#setup) → [Build](#build-program) → [Run and read the result](#first-result) → [Your own input](#your-own-input) → [Result checks](#check-result) → [Develop an algorithm](#develop-an-algorithm) → [Website evaluation](#easymsa-benchmark).
 
-| Document | Purpose |
-| --- | --- |
-| [Design specification](docs/design.md) | The authoritative English specification for architecture, data contracts, CLI behavior, the reference algorithm, and verification. |
-| [中文开发指南](docs/guide.zh-CN.md) | 中文介绍程序各层的职责、核心替换步骤、输入输出规则和检查方法。 |
-| [EasyMSA 网站评测接入](#easymsa-benchmark) | benchmark 目录、脚本接口、输出保真、自测命令与失败排查。 |
-| [Input testing guide](docs/testing.md) | Input-case matrix, expected handling, failure checks, and instructions for extending and reproducing tests. |
-| [MIT license](LICENSE) | Terms for using, modifying, and redistributing MSA-Kit. |
-| [Third-party notices](THIRD_PARTY_NOTICES.md) | Pinned sources, adapted code, and dependency licenses. |
+<a id="what-is-msa"></a>
 
-## Features
+## 1. What are we trying to align?
 
-- DNA and RNA input in FASTA or FASTQ, including gzip-compressed input and standard input; FASTQ quality values are ignored after parsing.
-- HAlign-style nucleotide cleaning, with explicit errors for pre-existing `-` or `.` gap characters.
-- Aligned FASTA or gzip FASTA output, with original record order and headers rebuilt from kseq's `name` and `comment` fields.
-- A fixed command-line interface, documented exit codes, and logs on standard error.
-- A small, in-memory C++ interface for replacing the alignment core.
-- A deterministic reference star alignment and small synthetic contract tests.
+A biological sequence is represented as a string of letters. DNA commonly uses A, C, G and T; RNA uses U in place of T. A **pairwise alignment** compares two sequences. **Multiple sequence alignment (MSA)** usually compares three or more, arranging their letters into columns so you can examine corresponding positions. MSA-Kit also accepts one or two records for small tests.
 
-The supported platform is Linux. The implementation uses C++17 and CMake 3.18 or newer. CLI11 2.6.1, spdlog 1.16.0, doctest 2.4.12, and kseq from the pinned HAlign-5 revision are bundled; configuration and compilation do not download dependencies. Install a C++17 compiler, CMake, and zlib development files on the system. Tests additionally require Python 3.8 or newer; the executable does not require Python.
+For a first exercise, use the supplied synthetic data. For biological work, begin with related sequences from the same gene or comparable region, in the same orientation. Merely putting unrelated sequences in a file does not make the resulting columns biologically meaningful. MSA-Kit does not select homologous sequences, reverse-complement them, or perform read assembly for you.
 
-## Architecture
-
-```mermaid
-flowchart LR
-    A[CLI parsing] --> B[Read, clean, and validate input]
-    B --> C[Replaceable alignment core]
-    C --> D[Validate alignment result]
-    D --> E[Write FASTA or gzip FASTA]
-```
-
-The framework retains headers and input order. The core receives prepared sequences and returns aligned rows at the same positions:
-
-```cpp
-namespace msakit {
-
-struct SequenceRecord {
-    std::string header;
-    std::string sequence;
-};
-
-struct Alignment {
-    std::vector<std::string> rows;
-};
-
-Alignment align(const std::vector<SequenceRecord>& input);
-
-}
-```
-
-The input vector and records are not copied by this call. The framework owns them throughout the call, and the core must not modify them or retain references after returning. The declaration is in [include/msakit/core.hpp](include/msakit/core.hpp), with the replaceable implementation in [src/align.cpp](src/align.cpp). The source directory contains seven files organized by responsibility:
+Consider three short inputs:
 
 ```text
-src/
-├── main.cpp          # Minimal program entry point
-├── cli.cpp           # Options, logging, application flow and error handling
-├── input.cpp         # Files/stdin, gzip decoding, kseq records and cleaning
-├── output.cpp        # FASTA/gzip writing, path protection and atomic publication
-├── validation.cpp    # Algorithm-independent alignment checks
-├── align.cpp         # Replaceable reference star alignment
-└── internal.hpp      # Shared internal declarations and checked arithmetic
+Name      Sequence      Length
+center    AC            2
+q1        ATC           3
+q2        AGGC          4
 ```
 
-The executable and test programs link the same framework library. The core depends only on the C++ standard library; the vendored parser lives in `extern/kseq/kseq.h`.
+The reference algorithm in this project produces:
 
-| Development task | Edit here |
+```text
+Column    1 2 3 4
+center    A - - C
+q1        A T - C
+q2        A G G C
+```
+
+Read this **by column**: the A letters occupy column 1, the C letters column 4, and gaps make room for letters between them. Every aligned row now has four positions. Removing `-` from each row recovers its input sequence.
+
+A gap is a position where a row has no nucleotide in this alignment. Its placement expresses a proposed correspondence between sequences; this toy result does not by itself establish a particular evolutionary insertion or deletion. Different algorithms can produce different gap placements.
+
+| Symbol or term | Meaning here |
 | --- | --- |
-| Change options, startup or execution flow | [cli.cpp](src/cli.cpp) |
-| Change input parsing or cleaning | [input.cpp](src/input.cpp) |
-| Change output formatting or file handling | [output.cpp](src/output.cpp) |
-| Change the shared result checks | [validation.cpp](src/validation.cpp) |
-| Implement an alignment algorithm | [align.cpp](src/align.cpp) |
+| `A`, `C`, `G`, `T`, `U` | Nucleotide letters. |
+| `N` | An unspecified nucleotide; it still occupies a sequence position. |
+| `-` (gap) | No nucleotide for this row at this alignment position. |
+| Match | Two compared letters agree under the chosen scoring rule. |
+| Mismatch | Two compared letters differ under that rule. |
+| Alignment column | One position across all aligned rows, including gaps. |
 
-`main.cpp` calls `run_application()` in the command-line module. That function connects reading, core execution, result validation and writing. Internal declarations stay in one header, while implementation helpers remain local to their modules. Version 0.3.0 retains this seven-file organization and the input/output behavior of 0.2.0.
+`N` and `-` have different meanings. Do not replace one with the other to make rows look aligned.
 
-Every returned row must preserve its corresponding cleaned input sequence when gaps are removed. All rows must have the same length, and no column may consist entirely of gaps. Rebuilt headers and duplicate records are preserved by input position rather than matched through a unique-name map.
+<a id="fasta-input"></a>
+
+## 2. Read the input file: FASTA
+
+Open [examples/tiny.fasta](examples/tiny.fasta). It contains:
+
+```fasta
+>center
+AC
+>q1
+ATC
+>q2
+AGGC
+```
+
+Each `>` starts a new record. The rest of that line is its **header** (a name, optionally followed by a description). The following sequence lines belong to that record until the next header. A record may span several sequence lines; the lines are joined when read. Three records in one FASTA file form the input for this example.
+
+For your first files, choose distinct simple names, use plain-text UTF-8, and put only nucleotide letters on sequence lines. Input rows may have different lengths. Supply **unaligned** input: this program rejects existing `-` and `.` in parsed sequences. A file extension such as `.fasta` names the format; it does not convert a spreadsheet or a Word document into FASTA.
+
+The output will also be FASTA, but its sequence rows contain inserted gaps and have equal lengths. Input FASTA, output aligned FASTA and a table of benchmark scores are three different things.
+
+<a id="setup"></a>
+
+## 3. Prepare a Linux terminal
+
+Run the commands below in Linux. On Windows, use a Linux environment such as Ubuntu in WSL and enter its terminal first. The project uses Linux file operations and does not build as a native Windows application.
+
+You need Git to obtain the project, a C++17 compiler and CMake to build it, zlib development files for gzip support, and Python 3.8 or newer for tests. The standalone C++ program does not need Python; the separate website adapter does.
+
+On Ubuntu/Debian, if these packages are missing, an administrator can install them with:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y git build-essential cmake zlib1g-dev python3
+```
+
+Package installation and downloading the repository use the network. Once those are ready, MSA-Kit's normal build uses its bundled dependencies without downloading more libraries. On a shared server, ask its administrator to provide missing packages rather than changing the server environment yourself.
+
+Get the project, then work from its root directory:
+
+```bash
+git clone https://github.com/malabz/MSA-Kit.git
+cd MSA-Kit
+```
+
+If you already have a copy, enter that directory instead. You should see `CMakeLists.txt`, `src/` and `examples/`. Commands below assume you are in this directory. Text inside a code block is the command; do not type a shell prompt such as `$` before it.
+
+<a id="build-program"></a>
+
+<a id="build-and-test"></a>
+<a id="quick-start"></a>
+
+## 4. Build the program
+
+```bash
+cmake -S . -B build-learning -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+cmake --build build-learning --parallel 2
+./build-learning/msakit --version
+```
+
+`-S .` selects the current source directory. `-B build-learning` keeps generated files in a separate build directory. The second command compiles the program. `./build-learning/msakit` is the resulting executable; `--version` should print `msakit 0.3.0`.
+
+Compiler progress messages are normal. If configuration or compilation fails, resolve that error before proceeding. A successful build gives you a program; it has not yet aligned your data.
+
+<a id="first-result"></a>
+
+## 5. Run and understand the supplied example
+
+```bash
+./build-learning/msakit -i examples/tiny.fasta -o build-learning/tiny.aligned.fasta --force
+cat build-learning/tiny.aligned.fasta
+python3 -c 'from pathlib import Path; assert Path("examples/tiny.expected.fasta").read_text() == Path("build-learning/tiny.aligned.fasta").read_text(); print("Example: PASS")'
+```
+
+- `-i` identifies the input file.
+- `-o` identifies the output file.
+- `--force` permits replacing this example's existing output when you repeat the exercise. Leave it out when you want existing files protected.
+- `cat` displays the saved result; progress messages from the aligner go to the terminal's error stream, separately from FASTA.
+- The final Python command compares the saved result with the reference-core example, treating LF and CRLF line endings equivalently. It prints `Example: PASS` when they agree.
+
+Expected file contents:
+
+```fasta
+>center
+A--C
+>q1
+AT-C
+>q2
+AGGC
+```
+
+This is the four-column alignment from section 1. The original names and their order are retained. `center` still has its original A and C; the algorithm inserted gaps, not new nucleotides. This exact expected layout is for the supplied reference algorithm. A replacement algorithm can return a different valid layout.
+
+Before continuing, try answering: how many alignment columns are there? What is q1 after removing its gap? Does producing this file establish biological accuracy?
+
+<details>
+<summary>Check your answers</summary>
+
+There are four columns. q1 becomes ATC. This synthetic exercise demonstrates the reference program's output; biological quality requires judging the proposed correspondence, with suitable evidence or a reference where available.
+
+</details>
+
+<a id="your-own-input"></a>
+
+## 6. Try a small file of your own
+
+Create three more short synthetic DNA sequences:
+
+```bash
+cat > build-learning/my-input.fasta <<'FASTA'
+>seq_a
+ACGT
+>seq_b
+AGT
+>seq_c
+ACGTT
+FASTA
+./build-learning/msakit -i build-learning/my-input.fasta -o build-learning/my-alignment.fasta --force
+cat build-learning/my-alignment.fasta
+```
+
+Read each aligned row and remove its gaps by eye. You should recover ACGT, AGT and ACGTT in that order, and all aligned rows should have the same length. The `FASTA` lines delimit the shell's file-writing block; they are not part of the file. Use a new output path for real data, and keep your original inputs.
+
+Before using ambiguity symbols, learn the cleaning rule. Codes such as R (A or G) are valid nucleotide ambiguity symbols, but the ordinary MSA-Kit CLI keeps only A/C/G/T/U/N, uppercases their lowercase forms, and maps other returned sequence bytes to N. For example, `acRUn` becomes `ACNUN`. The CLI's preservation check uses this **cleaned sequence**. Start with A/C/G/T/U/N, then read [input preparation](docs/guide.md#3-input-preparation) before using your own ambiguous data. The website adapter separately restores original ambiguity symbols, as explained in its tutorial.
+
+<a id="check-result"></a>
+
+## 7. Check that you understand the result
+
+Ask these questions about an alignment:
+
+1. Are all input records present, with the expected names and order?
+2. Are all aligned rows equally long and nonempty?
+3. Does removing `-` recover each corresponding cleaned input sequence?
+4. Are the characters valid, with no column containing gaps in every row?
+
+MSA-Kit checks these properties before writing a successful result. They establish that the program preserved the required data and produced a well-formed alignment. Biological quality asks a further question: do the proposed columns correspond to meaningful positions in related sequences? A structurally valid result can still be a poor biological alignment.
+
+Run the supplied software checks:
+
+```bash
+(cd build-learning && ctest --output-on-failure)
+```
+
+The supplied project registers four CTest entries. A successful complete run reports all four passing. The tests use small synthetic data; they check software behavior and the reference algorithm, rather than certifying biological accuracy on your dataset.
+
+<a id="develop-an-algorithm"></a>
+
+## 8. Develop an algorithm inside this program
+
+After completing the exercise, open [src/align.cpp](src/align.cpp) and find **Reference star alignment — replaceable core**. The supplied algorithm chooses the first sequence as the center, uses Needleman–Wunsch global pairwise alignment, and merges insertions around that center.
+
+In the example, the slot between A and C needs room for GG, so its width is two. q1's T is left-aligned there to give AT-C. The core stores full dynamic-programming tables: it is useful for learning and small checks, but long inputs can have substantial time and memory cost.
+
+Writing an algorithm requires C++ knowledge, while readers and the CLI can be reused. The framework supplies prepared records to `align()`, you return aligned strings in input order, and the outer layers validate and write them. Continue with the [developer guide](docs/guide.md), which traces the same example through this interface before you replace the algorithm.
+
+After source changes, rebuild and run the reusable contract checks:
+
+```bash
+(cd build-learning && ctest -L contract --output-on-failure)
+```
+
+`contract` tests reusable rules; `reference` tests the supplied star algorithm's scores and exact layouts. Add tests for your replacement strategy and adapt algorithm-specific expectations.
 
 <a id="easymsa-benchmark"></a>
 
-## EasyMSA 网站评测接入：准备 `benchmark/` 目录
+## 9. Evaluate a program on the website
 
-网站入口：[EasyMSA — 提交评测](https://easymsa.cn/#/benchmark/submit)。
-提交公开 GitHub 仓库后，网站会固定提交版本，依次执行构建、小样本接口预检和正式数据集评测。
-**基于本项目开发时，保留下面四个文件，主要修改 `src/align.cpp` 即可。**
+To see the process before running a full experiment, open [EasyMSA's submission page](https://easymsa.cn/#/benchmark/submit) and choose the MSA-Kit example. It displays already completed real results without starting a new benchmark job.
 
-```text
-your-repository/
-├── CMakeLists.txt
-├── src/
-├── include/
-├── extern/                  # 已随仓库提供的离线依赖
-└── benchmark/
-    ├── build.sh             # 网站调用的构建入口，必需
-    ├── run.sh               # 网站调用的运行入口，必需
-    ├── adapter.py           # 本模板的标题、模糊碱基保真适配器
-    └── test_adapter.py      # 适配器自测
-```
+When you have a program to evaluate, follow the [Benchmark integration tutorial](benchmark/README.md). You provide a public repository with `benchmark/build.sh` and `benchmark/run.sh`; the website fixes a source commit, builds it, checks small inputs, then runs supported datasets. The supplied adapter preserves complete titles and restores original IUPAC characters after validating the core output.
 
-网站要求前两个脚本位于**仓库根目录的 `benchmark/` 下**。`adapter.py` 和测试文件是本模板的实现选择；
-自己的程序可以使用其他实现，只要遵守下面相同的接口。所有脚本、源码和依赖都需要提交到 GitHub，不能只存在于本机。
-
-### 1. 构建入口：`benchmark/build.sh`
-
-网站从仓库根目录执行：
-
-```bash
-bash benchmark/build.sh
-```
-
-本项目的完整脚本如下：
-
-```bash
-#!/usr/bin/env bash
-set -euo pipefail
-cd "$(dirname "$0")/.."
-cmake -S . -B build-benchmark -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
-cmake --build build-benchmark --parallel 2
-```
-
-成功后应生成 `build-benchmark/msakit`，退出码为 `0`。网站保存构建产物，供后续每组数据使用，
-所以不要在 `run.sh` 中重复编译。构建失败应返回非零，不能用 `|| true` 隐藏错误。
-
-- 构建在 Linux 容器内执行，提供 C++／CMake、Python 和 Bash 工具链；本项目使用 C++17、CMake 和 zlib。
-- **构建、运行阶段均断网。** 不在脚本中执行 `apt`、联网 `pip install`、`git clone`，或依赖 CMake 在线下载。
-  依赖应由平台镜像提供，或作为普通文件随仓库提交。不要依赖 Git 子模块或 Git LFS 的额外下载。
-- 不提交本机生成的可执行文件作为唯一构建方式；不要写死本机目录、用户名或系统专属路径。
-- Python 等无需编译的项目也应提供 `build.sh`，可以执行离线准备检查后成功退出。
-- Shell 文件使用 LF 换行。平台通过 `bash` 调用，不要求依赖可执行位；保留 shebang 便于本地直接运行。
-
-### 2. 运行入口：`benchmark/run.sh`
-
-网站按下面的**四个位置参数**调用，顺序固定：
-
-```bash
-bash benchmark/run.sh INPUT_FASTA OUTPUT_FASTA THREADS SEQUENCE_TYPE
-```
-
-| 参数 | 含义 | 脚本应如何使用 |
-| --- | --- | --- |
-| `$1` | 未比对 FASTA 的绝对路径 | 只读，不修改输入。 |
-| `$2` | aligned FASTA 的目标绝对路径 | 将完整结果写到这里；不要写到固定文件名。 |
-| `$3` | 允许使用的 CPU／线程额度，正整数 | 多线程程序将其传给线程参数；不得超过额度。 |
-| `$4` | `dna` 或 `rna` | 选择对应模式；只声明程序实际支持的类型。 |
-
-**路径由平台提供，不能假定一定是 `/outputs/`。** 例如预检可能传入
-`/inputs/input.fasta` 和 `/work/output/aligned.raw.fasta`；这只是路径示例。
-始终引用 `"$1"`、`"$2"`，以便正确处理含空格的路径。
-
-本项目的完整脚本如下：
-
-```bash
-#!/usr/bin/env bash
-set -euo pipefail
-if [ "$#" -ne 4 ]; then
-  echo 'Usage: benchmark/run.sh INPUT OUTPUT THREADS dna|rna' >&2
-  exit 2
-fi
-cd "$(dirname "$0")/.."
-exec python3 benchmark/adapter.py "$1" "$2" "$3" "$4"
-```
-
-成功时目标文件必须已经写完并关闭，脚本返回 `0`；失败返回非零。日志写到标准错误，不能混进 FASTA。
-不要启动后台进程后提前返回。输入和构建产物按只读使用，运行临时文件应放在平台提供的可写工作区；
-本适配器将临时目录建在 `$2` 的父目录，结束后清理。输出是普通、未压缩的 aligned FASTA。
-
-参考星比对是单线程实现，接受 `$3` 作为额度，并不会因此变为多线程。
-若替换成其他程序，需在适配器调用该程序时显式传入线程数。
-
-### 3. 输出必须满足什么条件？
-
-网站按**完整 FASTA 标题**匹配记录，不能只保留第一个空格前的名字。
-例如 `>sample strain_A description` 和 `>sample\tstrain_B` 是不同记录，
-即使第一个单词都为 `sample`，也不能覆盖或合并。建议原样恢复标题的空格、制表符及描述。
-
-| 检查项 | 要求 |
+| Result | How to read it |
 | --- | --- |
-| 记录身份 | 输出与输入的完整标题集合一致，每条记录恰好出现一次；不得增删或合并记录。 |
-| 对齐形状 | 所有输出序列等长，非空；使用 `-` 表示新增 gap。 |
-| 序列保真 | 每条输出去掉 `-` 后与相应输入一致，按大小写不敏感比较。 |
-| DNA／RNA 字符 | 保留原始 IUPAC 模糊碱基；不把 `R/Y/...` 永久改成 `N`，不把 `U` 转成 `T`。 |
-| 输出格式 | 只有合法 FASTA 标题和序列；不混入日志、统计表或 FASTQ 质量值。 |
+| Time | Runtime for that measurement; lower means faster. |
+| Peak memory | Maximum recorded memory use; lower means less memory. |
+| Q / TC | Reference-based alignment quality measures; higher is better under the report's definition. Read them where a reference is available. |
+| Normalized SP | A reported alignment-scoring measure; higher is better under the same scoring rules. It is not an accuracy percentage or a probability. |
+| Timeout / memory limit / invalid output | Actual run outcomes, not zero-quality scores. |
 
-平台允许按标题匹配重排后的行；本模板会恢复为原输入顺序，并额外拒绝全 gap 列。
-重复序列必须作为各自独立记录保留。MSA-Kit 普通 CLI 允许重复标题，而当前网站输入策略要求完整标题唯一，
-不要将两者混为一套规则。
+Compare methods on the same dataset and inspect their execution/scoring conditions. Speed and quality answer different questions. A reference alignment is an existing target used for quality assessment, not the expected output of every algorithm. Q/TC need a reference; their absence is different from a zero score. The template's simple star core can time out or exhaust memory on large inputs even after passing interface checks.
 
-### 4. 为什么 MSA-Kit 需要 `adapter.py`？换算法后改哪里？
+Use **Download data** for unaligned dataset FASTA; use **Export results** for measured CSV/JSON. Your own aligned FASTA is a separate output of the alignment program.
 
-普通 MSA-Kit CLI 会将 IUPAC 模糊字符清洗成 `N`，kseq 也可能重新拼接标题中的空白。
-直接在运行脚本里调用 `msakit -i "$1" -o "$2"`，可能生成结构合法却无法通过网站原序列保真检查的结果。
+<a id="troubleshooting"></a>
 
-已有的 [适配器](benchmark/adapter.py) 按以下顺序处理：
+## 10. When something goes wrong
 
-1. 保存完整原始标题和序列，为各记录生成唯一短 ID。
-2. 仅向核心传入短 ID，将 `ACGTUN` 以外的合法 IUPAC 字符暂时映射为 `N`；T／U 保留。
-3. 调用 `build-benchmark/msakit`，等待退出。
-4. 先核对短 ID、行长及去 gap 后的**清洗后序列**，拒绝核心改写、漏行等错误。
-5. 按每个非 gap 字符在原序列中的位置恢复模糊碱基和完整标题，再写出最终文件。
-
-只替换 `src/align.cpp` 时，这四个接入文件通常无需修改。若更改可执行文件名或位置，
-同步修改 `build.sh` 和 `adapter.py` 中的 `build-benchmark/msakit`；若改用其他 CLI，
-修改适配器 `run()` 中的 `subprocess.run(...)` 参数及线程传递。
-保留“先校验核心输出，再恢复原字符”的顺序，不能直接用原序列覆盖错误输出来绕过检查。
-这项 IUPAC→N 处理属于算法输入预处理，应在方法说明中写明；能原生保真处理 IUPAC 的程序可自行实现直连接口。
-
-### 5. 提交前在 Linux 本地自测
-
-先从仓库根目录运行：
-
-```bash
-# 尤其是从 Windows 编辑后，先统一 Shell 脚本为 LF 换行。
-python3 -c 'from pathlib import Path; files = [Path("benchmark/build.sh"), Path("benchmark/run.sh")]; [p.write_bytes(p.read_bytes().replace(b"\r\n", b"\n")) for p in files]'
-bash -n benchmark/build.sh benchmark/run.sh
-bash benchmark/build.sh
-python3 benchmark/test_adapter.py
-```
-
-再复制下面整段命令，检查接近网站预检的 DNA／RNA 输入。它包含相同首单词的不同完整标题、
-制表符、IUPAC 字符和多行序列；每次使用新的输出路径，避免旧文件造成误判。
-
-```bash
-python3 - <<'PY'
-from pathlib import Path
-import subprocess
-import tempfile
-from benchmark.adapter import read_records
-
-for kind, base in [('dna', 'T'), ('rna', 'U')]:
-    with tempfile.TemporaryDirectory(prefix='msakit-smoke-') as directory:
-        directory = Path(directory)
-        source, output = directory / 'input.fasta', directory / 'aligned.fasta'
-        source.write_text(
-            '>sample strain_A description\nACG' + base + '\nRYSWKMBDHVN\n'
-            '>sample\tstrain_B\nAGN\n>third record\nACG\n', encoding='utf-8')
-        subprocess.run(['bash', 'benchmark/run.sh', str(source), str(output), '1', kind], check=True)
-        before = read_records(source)
-        after = read_records(output, aligned=True)
-        assert [(title, row.replace('-', '')) for title, row in after] == before
-        assert len({len(row) for _, row in after}) == 1
-        assert not any(all(row[i] == '-' for _, row in after) for i in range(len(after[0][1])))
-        print(kind + ': PASS')
-PY
-```
-
-预期看到适配器测试成功，以及 `dna: PASS`、`rna: PASS`。接着可从网站 Benchmark 的“下载数据”
-获取真实 FASTA，先选较小的数据集测试，再逐步增加规模。小样本通过说明接口可用，
-不能保证参考星比对在大型数据集上不超时或不耗尽内存。
-
-### 6. 在网站提交与查看结果
-
-1. 将修改后的源码、离线依赖及 `benchmark/` 文件提交并推送到自己的公开 GitHub 仓库。
-2. 打开[提交评测](https://easymsa.cn/#/benchmark/submit)，填写仓库链接；在更多设置中选择实际支持的 DNA／RNA，必要时填写版本。
-3. 网站解析为固定 commit 后创建任务。后续再推送代码不会改变这次任务；要评测修复后的代码，应另提交新任务。
-4. 通过构建和对应类型的小样本预检后，网站运行正式数据集；未声明支持的类型显示“不支持”。
-5. 保存结果链接或恢复文件。当前浏览器的“最近评测”可找回任务；邮箱可选，用于接收任务链接。
-
-当前用户评测每组运行一次，CPU 上限为 4、内存上限为 32 GiB，构建和单组比对限时均为 30 分钟；
-每个评分器也单独限时 30 分钟。临时空间 8 GiB、单元输出 1 GiB、日志 8 MiB、进程数 512。
-实际条件以任务实验详情为准。不要在接入脚本里自行算 Q／TC、下载参考答案或输出评分 JSON；
-平台独立校验和评分，你的运行入口只负责生成比对 FASTA。
-
-### 7. 常见失败如何排查
-
-| 现象／错误类别 | 优先检查 |
+| What you see | First action |
 | --- | --- |
-| `missing_entrypoint` | 当前提交中是否真的包含根目录下的 `benchmark/build.sh` 和 `benchmark/run.sh`；注意大小写。 |
-| `build_failed` | 构建日志中的首个错误；是否在线下载依赖、依赖本机路径、使用容器不支持的工具链。 |
-| `precheck_failed` | 先运行上面的小样本；检查完整标题、IUPAC、RNA 的 U，以及是否写到 `$2`。 |
-| `title_mismatch`／`duplicate_title` | 工具是否截断标题、合并记录或更改 ID；检查短 ID 映射及标题恢复。 |
-| `sequence_changed` | 是否把模糊碱基改为 N、U 改为 T，或删改了非 gap 字符；检查恢复前的核心输出。 |
-| `unequal_lengths`／输出无效 | 是否返回了等长 aligned FASTA，而不是输入原样复制、空文件或部分结果。 |
-| `Permission denied`／只读文件系统 | 是否试图修改源码目录、输入目录，或向固定绝对路径写缓存；临时文件改放输出父目录等可写工作区。 |
-| `bad interpreter`／`$'\r'` | Shell 脚本可能使用 CRLF；转换为 LF 后重新提交。 |
-| 超时／内存超限 | 核对算法复杂度和线程参数，先用较小数据复现；检查是否仍在使用完整 DP 的参考星比对。 |
-| 评分失败 | 先确认比对输出校验通过，再查看任务的评分状态；评分阶段失败与程序构建失败分别处理。 |
+| `cmake`, `g++` or `python3`: command not found | Return to the Linux environment and prerequisites in section 3. |
+| CMake reports a missing zlib | Install/provide the zlib development package, not only the runtime library. |
+| `./build-learning/msakit`: not found | Check your current directory and whether the build completed. |
+| Input file cannot be opened | Check `-i` and the path relative to the repository root. |
+| Output already exists | Choose a new output name, or use `--force` if replacement is intended. |
+| An existing gap is rejected | Supply the original unaligned sequences, not a previous aligned output. |
+| A letter became N | Review the CLI cleaning rule in section 6. |
+| A large input fails or takes too long | Reproduce with a small subset and inspect lengths/counts; the full-DP teaching core has substantial memory/time cost. |
+| A changed algorithm fails only `reference` tests | Review those algorithm-specific expectations and run the reusable `contract` group. |
+
+For further reading, use [EMBL-EBI's introduction to MSA](https://www.ebi.ac.uk/training/online/courses/guide-to-sequence-analysis-tools/sequence-alignment/multiple-sequence-alignment/) and [NCBI's nucleotide FASTA guide](https://www.ncbi.nlm.nih.gov/genbank/fastaformat). The latter also includes GenBank-specific submission rules; MSA-Kit's exact parser behavior is documented in its [design specification](docs/design.md#4-input-contract).
 
 
-## Build and test
+## Documentation map
 
-From the repository root:
+| What you want to do next | Document |
+| --- | --- |
+| Understand the framework and replace the core | [Developer guide](docs/guide.md) |
+| Prepare scripts and submit to the website | [Benchmark integration](benchmark/README.md) |
+| Look up precise input/output, CLI and errors | [Design specification](docs/design.md) |
+| Write and extend software tests | [Testing guide](docs/testing.md) |
+| Inspect actual environments and recorded checks | [Validation record](docs/validation.md) |
+| Understand small synthetic test files | [Fixture notes](tests/data/msa/README.md) |
+| Inspect sources, dependency versions and licensing | [Third-party notices](THIRD_PARTY_NOTICES.md) |
 
-```bash
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
-cmake --build build --parallel 2
-(cd build && ctest --output-on-failure)
-./build/msakit -i examples/tiny.fasta -o build/tiny.aligned.fasta
-cmp examples/tiny.expected.fasta build/tiny.aligned.fasta
-```
+## Capabilities, dependencies and sources
 
-The example output must not already exist unless `--force` is supplied. To build just the executable without test dependencies, configure with `-DBUILD_TESTING=OFF`. An optional install is available through `cmake --install build --prefix <prefix>`.
+The program reads FASTA, FASTQ and mixed records recognized by pinned kseq, through plain/gzip files or stdin. FASTQ quality lengths are checked, then qualities are discarded. Output is aligned FASTA; named files ending in `.gz` are compressed and stdout remains plain FASTA. Default sequence width is 80; `--line-width 0` disables wrapping. Headers are rebuilt from kseq name/comment fields, preserving record order and duplicates. Diagnostics go to stderr. Named output uses overwrite protection, same-file/link identity checks, checked temporary writes and atomic publication.
 
-## Usage
+Linux, C++17, CMake >=3.18 and system zlib are required. CLI11 2.6.1, spdlog 1.16.0, doctest 2.4.12 and pinned kseq are bundled; normal builds do not download dependencies. Tests require Python >=3.8. The C++ executable needs no Python at runtime; the separate website adapter does. `BUILD_TESTING=OFF` builds just the program; optional installation uses `cmake --install build-learning --prefix <prefix>`.
 
-Use `./build/msakit` directly, or `msakit` after installing it on `PATH`:
-
-```bash
-msakit -i input.fasta -o aligned.fasta
-msakit -i input.fasta.gz -o aligned.fasta.gz
-msakit -i reads.fastq.gz -o aligned.fasta
-cat input.fasta | msakit -i - -o - > aligned.fasta
-```
-
-Input compression is detected from its contents. A named output ending in `.gz` is compressed; `-o -` writes plain aligned FASTA to standard output. Logs go to standard error. Output wraps at 80 characters by default; `--line-width 0` disables wrapping.
-
-Existing output files require `--force`. Input and output must not refer to the same file, even with `--force`. See the design specification for the complete options, error behavior, and output-completion rules.
-
-When chaining multiple programs in Bash, use `set -o pipefail` and check the pipeline status. Shell redirection can leave a partial file on failure; it does not provide the completed-write protection of a named `-o` destination.
-
-## Replacing the reference core
-
-The developer workflow is:
-
-1. Copy or clone MSA-Kit and build the unchanged template.
-2. Run its small synthetic tests to check the local setup.
-3. Replace the implementation of `msakit::align` in the designated core source file.
-4. Keep the input/output contract and rerun the framework contract tests.
-5. Add tests for the new algorithm's own scoring, edge cases, and expected behavior.
-
-To run only algorithm-independent checks after replacing the core:
-
-```bash
-(cd build && ctest -L contract --output-on-failure)
-```
-
-Tests labeled `reference` check the supplied star algorithm's scoring and exact examples; update or replace these for a different algorithm. The default `ctest` command runs both groups.
-
-The supplied core is labeled **Reference star alignment — replaceable core**. It uses the first input sequence as the center, global Needleman–Wunsch pairwise alignment, and a deterministic insertion-slot merge. It is intended for small demonstrations and interface validation; it does not provide HAlign-5's performance or guarantee an optimal multiple alignment. Alternative cores may produce different valid gap layouts.
-
-## Input cleaning at a glance
-
-Cleaning applies to the sequence bytes returned by kseq. Accepted lowercase `a/c/g/t/u/n` becomes uppercase. `A/C/G/T/U/N` is preserved, and other sequence bytes become `N`. Pre-existing `-` or `.` causes an input error. Spaces and tabs that remain in a parsed sequence become `N`. Headers and FASTQ qualities do not undergo sequence cleaning.
-
-This cleaning can discard ambiguity information. Output preservation is checked against the cleaned sequences supplied to the core. T and U remain distinct output characters; the reference core treats them as equivalent only when scoring.
-
-## Migrating a core from 0.2.0
-
-Version 0.3.0 lowers the language requirement from C++20 to C++17 and replaces the `std::span` parameter with `const std::vector<SequenceRecord>&`. Update both the declaration and definition of a custom `msakit::align`, along with any custom core callbacks or helper signatures using the old parameter. Remove unused `<span>` includes and adapt any span-specific operations. Calls that already pass the framework's input vector keep the same form: `align(records)`.
-
-Rebuild the framework, custom core, and tests together in a fresh build directory, then run the `contract` tests. The change is a source-interface change; the reference parameter still avoids copying records and preserves their positional identity. `SequenceRecord` and `Alignment` fields, CLI options, input/output rules, exit codes, and reference-algorithm behavior are unchanged. `--version` now reports `0.3.0`. See the [C++17 build checks](docs/testing.md#c17-build-compatibility) and [actual validation results](docs/validation.md) for compiler coverage.
-
-## Input changes introduced in 0.2.0
-
-Version 0.2.0 replaced the strict FASTA parser from 0.1.0 with the fixed kseq parser. Version 0.3.0 retains these input semantics, along with the same gzip checks and output protection:
-
-- FASTQ and mixed FASTA/FASTQ records recognized by kseq are accepted. Qualities are parsed for length consistency and discarded; output is always aligned FASTA.
-- Headers use `name` plus a nonempty `comment`, joined by one space when both are present. For example, `>sample\tinfo` produces `sample info`; original separator whitespace is not preserved byte for byte.
-- When seeking a record, kseq skips preceding bytes until `>` or `@`. At the start of a sequence line, `>` or `@` starts the next record and `+` begins the quality section. The same bytes inside an ordinary sequence line are sequence content.
-- CR and end-of-file handling follow kseq. For example, a terminal CR in `AC\r` is stripped before cleaning. Empty CRLF lines have context-dependent behavior; see the explicit cases in the [design](docs/design.md#4-input-contract).
-- Content errors identify the source and a record number when available; exact physical line numbers are no longer promised. No returned records, blank returned headers, empty sequences, existing gaps, and reported quality-length errors are rejected.
-
-The parser includes checked allocation and length handling, with each parsed field limited to `INT_MAX` bytes. These safety patches do not change normal record semantics. A syntactically unusual file may therefore be accepted, skipped in part, or rejected differently than in 0.1.0; callers needing a stricter format policy should validate it before invoking MSA-Kit.
-
-## HAlign-5 provenance and licensing
-
-The design is based on [HAlign-5 at commit `b0d5608811d44e30bc323da54f0583ceaaf684d2`](https://github.com/pinglu-zhang/HAlign-5/tree/b0d5608811d44e30bc323da54f0583ceaaf684d2), particularly its CLI organization, `kseq_init`/`kseq_read`/`kseq_destroy` record lifecycle, header reconstruction, reader/writer abstractions, and nucleotide-cleaning table. The design specification records the file-level provenance and intentional changes.
-
-MSA-Kit is distributed under the [MIT license](LICENSE). HAlign-5's copyright and permission notice are retained for the adapted cleaning code. Third-party libraries retain their own license and attribution requirements; [the notices](THIRD_PARTY_NOTICES.md) and [dependency manifest](extern/provenance.json) record the sources and file checksums.
-
-## Verification and limits
-
-The test suite separates framework contracts from reference-core examples and includes a reusable input-case matrix, real subprocess/pipe tests, gzip corruption cases, deterministic file-operation failures, and independent short-pair score checks. [The input testing guide](docs/testing.md) maps input rules to stable case identifiers and explains how to add cases. Sanitizers are available with `-DMSAKIT_ENABLE_SANITIZERS=ON` in a separate Debug build. Actual environment, commands, and results are recorded in [the validation report](docs/validation.md).
-
-The reference core holds the sequences and alignment in memory and uses a full pairwise DP matrix. It supports neither parallel execution nor protein/profile input. Successful output validation establishes structural correctness, not biological accuracy or large-dataset performance.
+The supplied single-threaded reference core supports neither protein nor profile alignment and does not guarantee optimal biological MSA. The design draws on [HAlign-5 b0d5608811d44e30bc323da54f0583ceaaf684d2](https://github.com/pinglu-zhang/HAlign-5/tree/b0d5608811d44e30bc323da54f0583ceaaf684d2). MSA-Kit uses the [MIT license](LICENSE); preserve upstream and dependency notices when copying it. [The dependency manifest](extern/provenance.json) records versions and checksums.

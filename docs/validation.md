@@ -1,5 +1,7 @@
 # MSA-Kit 0.3.0 validation
 
+**English** | [简体中文](validation.zh-CN.md)
+
 The C++17 migration was built and tested on the Linux server on 2026-10-27. This record describes newly executed checks for production, replacement-core and runtime-only configurations, starting from commit `a880fa7787e5a603c7b5db62924a972d8681e03e`. Version 0.3.0 changes the public core parameter to `const std::vector<SequenceRecord>&`; derived cores must update their signatures and rebuild with the framework. The seven-file layout and input/output behavior remain unchanged.
 
 ## Environment and source
